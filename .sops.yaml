@@ -1,0 +1,10 @@
+keys:
+  - &admin age1kp6sj8hc3q7v632ykyg2jkae3wx7qt45usvstdu5axpmw4zk3apskprura
+  - &host_galilei age1q3snkwdfgc6z6yshyx4cjfq5n06wl46vn0pc4psjqg35mznswyxstv5kts
+
+creation_rules:
+  - path_regex: ^hosts/galilei/secrets\.yaml$
+    key_groups:
+      - age:
+          - *admin
+          - *host_galilei

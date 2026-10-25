@@ -1,0 +1,9 @@
+.direnv
+result
+.env
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+shortlist.json
+shortlist.csv
