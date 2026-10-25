@@ -7,13 +7,16 @@
   imports = [
     flake.nixosModules.server
     ./boot.nix
+    ./cloudflared.nix
     ./disko.nix
     ./locale.nix
+    ./media.nix
     ./networking.nix
     ./nh.nix
     ./nix-index.nix
     ./nixpkgs.nix
     ./packages.nix
+    ./qbittorrent.nix
     ./shell.nix
     ./sops.nix
     (modulesPath + "/profiles/qemu-guest.nix")

@@ -4,7 +4,7 @@
 }:
 let
   vars = import ./hosts/galilei/variables.nix;
-  target = "root@${vars.sshHost}";
+  target = "root@ssh.${vars.domain}";
 
   server-login = pkgs.writeShellApplication {
     name = "server-login";
@@ -60,6 +60,7 @@ pkgs.mkShellNoCC {
     pkgs.ssh-to-age
     pkgs.age
     pkgs.pwgen
+    pkgs.cloudflared
 
     server-login
     server-switch

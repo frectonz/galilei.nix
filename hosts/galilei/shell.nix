@@ -12,6 +12,9 @@
     shellAbbrs = {
       lg = "lazygit";
       stat = "git status";
+      logs-jellyfin = "journalctl -u jellyfin -f";
+      logs-qbittorrent = "journalctl -u qbittorrent -f";
+      logs-cloudflared = "journalctl -u 'cloudflared-tunnel-*' -f";
     };
   };
 
