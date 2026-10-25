@@ -1,9 +1,9 @@
 {
-  config,
   flake,
   inputs,
   ...
 }:
+{ config, ... }:
 {
   imports = [
     inputs.disko.nixosModules.disko
