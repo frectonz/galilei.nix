@@ -76,6 +76,9 @@ in
         "Session\\DefaultSavePath" = torrentsDir;
         "Session\\TempPathEnabled" = true;
         "Session\\TempPath" = "${torrentsDir}/.incomplete";
+        "Session\\GlobalMaxRatio" = 2;
+        "Session\\GlobalMaxSeedingMinutes" = 4320;
+        "Session\\MaxRatioAction" = 0;
       };
       Network.PortForwardingEnabled = false;
     };

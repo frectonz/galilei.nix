@@ -1,4 +1,5 @@
 {
+  config,
   flake,
   inputs,
   ...
@@ -14,6 +15,9 @@
   users.users.root.openssh.authorizedKeys.keyFiles = [
     "${flake}/users/frectonz/authorized_keys"
   ];
+
+  sops.secrets.root_password_hash.neededForUsers = true;
+  users.users.root.hashedPasswordFile = config.sops.secrets.root_password_hash.path;
 
   sops.age.sshKeyPaths = [ "/etc/ssh/ssh_host_ed25519_key" ];
 
