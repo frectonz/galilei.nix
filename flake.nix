@@ -3,6 +3,8 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    rust-overlay.url = "github:oxalica/rust-overlay";
+    rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
 
     blueprint.url = "github:numtide/blueprint";
     blueprint.inputs.nixpkgs.follows = "nixpkgs";
@@ -24,5 +26,6 @@
     inputs:
     inputs.blueprint {
       inherit inputs;
+      nixpkgs.overlays = [ inputs.rust-overlay.overlays.default ];
     };
 }

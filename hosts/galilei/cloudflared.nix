@@ -12,6 +12,7 @@ in
       credentialsFile = config.sops.secrets.cloudflared_credentials.path;
       default = "http_status:404";
       ingress = {
+        "${vars.domain}" = "http://127.0.0.1:3000";
         "jellyfin.${vars.domain}" = "http://127.0.0.1:8096";
         "qbittorrent.${vars.domain}" = "http://127.0.0.1:8080";
       };

@@ -9,6 +9,7 @@
     ./boot.nix
     ./cloudflared.nix
     ./disko.nix
+    ./landing.nix
     ./locale.nix
     ./media.nix
     ./networking.nix
