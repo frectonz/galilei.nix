@@ -15,12 +15,11 @@ use tokio::{
 };
 use topcoat::{
     Result,
-    asset::{AssetBundle, RouterBuilderAssetExt},
+    asset::{Asset, AssetBundle, RouterBuilderAssetExt, asset},
     context::Cx,
     icon::{IconData, icon, iconify},
     router::{module_router, page},
     runtime::{RouterBuilderRuntimeExt, connected},
-    tailwind,
     view::{Child, View, class, component, emit, live, view},
 };
 use tracing::{debug, info, warn};
@@ -36,6 +35,7 @@ const JELLYFIN: &str = "127.0.0.1:8096";
 const QBITTORRENT: &str = "127.0.0.1:8080";
 const VIDEO: &[&str] = &["mkv", "mp4", "avi", "webm", "m4v", "mov"];
 const REFRESH: Duration = Duration::from_secs(5);
+const STYLE: Asset = asset!("./style.css");
 
 static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
     reqwest::Client::builder()
@@ -66,13 +66,11 @@ async fn home(cx: &Cx) -> Result<impl View> {
                 <meta charset="utf-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1">
                 <title>(DOMAIN)</title>
-                <link rel="stylesheet" href=(tailwind::stylesheet!())>
+                <link rel="stylesheet" href=(STYLE)>
                 topcoat::runtime::script()
             </head>
-            <body
-                class="min-h-screen bg-zinc-100 font-sans text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100"
-            >
-                <main class="mx-auto max-w-3xl px-4 py-8">
+            <body>
+                <main>
                     (live! {
                         loop {
                             let (jellyfin, qbittorrent, system) = tokio::join!(
@@ -111,7 +109,7 @@ async fn dashboard(
 ) -> Result<impl View> {
     Ok(view! {
         <header>
-            <h1 class="text-3xl font-bold">(DOMAIN)</h1>
+            <h1>(DOMAIN)</h1>
             subtle(
                 "galilei · up "
                 (system.uptime.as_str())
@@ -120,12 +118,12 @@ async fn dashboard(
             )
         </header>
 
-        <section class="my-6 grid gap-4 sm:grid-cols-2">
+        <section class="cards">
             jellyfin_card(info: jellyfin)
             qbittorrent_card(info: qbittorrent)
         </section>
 
-        <section class="my-6 grid gap-3">
+        <section class="stats">
             gauge(
                 data: feather::HARD_DRIVE,
                 label: "Disk",
@@ -152,7 +150,7 @@ async fn dashboard(
                 data: feather::ACTIVITY,
                 label: "Network",
                 speed(down: system.rx_rate, up: system.tx_rate)
-                <span class="text-zinc-500 dark:text-zinc-400">
+                <span class="subtle">
                     (bytes(system.rx_total))
                     " in · "
                     (bytes(system.tx_total))
@@ -161,19 +159,19 @@ async fn dashboard(
             )
         </section>
 
-        <section>
+        <section class="notices">
             card_title(data: feather::BELL, "Notices")
             if notices.is_empty() {
                 subtle(
-                    <span class="inline-flex items-center gap-1">
+                    <span class="inline">
                         icon(data: feather::CHECK_CIRCLE)
                         "Nothing needs your attention."
                     </span>
                 )
             } else {
-                <ul class="list-disc pl-5 text-sm">
+                <ul>
                     for notice in notices {
-                        <li class="my-1">(notice)</li>
+                        <li>(notice)</li>
                     }
                 </ul>
             }
@@ -239,21 +237,13 @@ async fn qbittorrent_card(info: &Qbittorrent) -> Result<impl View> {
 
 #[component]
 async fn card(href: &str, child: Child<'_>) -> Result<impl View> {
-    Ok(view! {
-        <a
-            class="block rounded-xl border border-zinc-200 bg-white p-5 hover:border-zinc-400 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-600"
-            href=(href)
-            rel="noreferrer"
-        >
-            (child)
-        </a>
-    })
+    Ok(view! { <a class="card" href=(href) rel="noreferrer">(child)</a> })
 }
 
 #[component]
 async fn card_title(data: IconData, child: Child<'_>) -> Result<impl View> {
     Ok(view! {
-        <h2 class="mb-2 flex items-center gap-2 text-base font-semibold">
+        <h2 class="inline">
             icon(data: data)
             (child)
         </h2>
@@ -262,18 +252,18 @@ async fn card_title(data: IconData, child: Child<'_>) -> Result<impl View> {
 
 #[component]
 async fn big(child: Child<'_>) -> Result<impl View> {
-    Ok(view! { <p class="text-3xl font-semibold">(child)</p> })
+    Ok(view! { <p class="big">(child)</p> })
 }
 
 #[component]
 async fn subtle(child: Child<'_>) -> Result<impl View> {
-    Ok(view! { <p class="text-sm text-zinc-500 dark:text-zinc-400">(child)</p> })
+    Ok(view! { <p class="subtle">(child)</p> })
 }
 
 #[component]
 async fn speed(down: u64, up: u64) -> Result<impl View> {
     Ok(view! {
-        <span class="inline-flex items-center gap-1">
+        <span class="inline">
             icon(data: feather::ARROW_DOWN)
             (bytes(down))
             "/s · "
@@ -287,10 +277,8 @@ async fn speed(down: u64, up: u64) -> Result<impl View> {
 #[component]
 async fn stat(data: IconData, label: &str, child: Child<'_>) -> Result<impl View> {
     Ok(view! {
-        <div
-            class="grid grid-cols-[7rem_1fr_11rem] items-center gap-3 text-sm [&>:last-child]:text-right"
-        >
-            <span class="flex items-center gap-2">
+        <div class="stat">
+            <span class="inline">
                 icon(data: data)
                 (label)
             </span>
@@ -303,14 +291,8 @@ async fn stat(data: IconData, label: &str, child: Child<'_>) -> Result<impl View
 async fn bar(percent: u64) -> Result<impl View> {
     let width = format!("width: {percent}%");
     Ok(view! {
-        <div class="h-2 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
-            <div
-                class=(class!(
-                    "h-full",
-                    "bg-red-600 dark:bg-red-400" if percent >= 80 else "bg-blue-600 dark:bg-blue-400",
-                ))
-                style=(width)
-            ></div>
+        <div class="bar">
+            <div class=(class!("fill", "warn" if percent >= 80)) style=(width)></div>
         </div>
     })
 }

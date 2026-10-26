@@ -1814,7 +1814,6 @@ dependencies = [
  "topcoat-runtime",
  "topcoat-runtime-macro",
  "topcoat-session",
- "topcoat-tailwind",
  "topcoat-view",
  "topcoat-view-macro",
 ]
@@ -2121,18 +2120,6 @@ dependencies = [
  "topcoat-core",
  "topcoat-router",
  "web-time",
-]
-
-[[package]]
-name = "topcoat-tailwind"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "efbc592cc87155ed9e2fd464407e0f7708d340966c4cc8a22ce0b55006fe5136"
-dependencies = [
- "sha2 0.11.1",
- "thiserror",
- "topcoat-core",
- "ureq",
 ]
 
 [[package]]

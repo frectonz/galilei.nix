@@ -12,7 +12,6 @@ rustPlatform.buildRustPackage {
   src = ./.;
   cargoLock.lockFile = ./Cargo.lock;
   nativeBuildInputs = [ perSystem.self.topcoat-cli ];
-  env.TAILWIND_CLI = pkgs.lib.getExe pkgs.tailwindcss_4;
   postBuild = ''
     CARGO_BUILD_TARGET=${pkgs.stdenv.hostPlatform.rust.rustcTarget} topcoat asset bundle --release --out assets
   '';
