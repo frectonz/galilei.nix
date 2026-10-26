@@ -165,8 +165,10 @@ async fn dashboard(
             card_title(data: feather::BELL, "Notices")
             if notices.is_empty() {
                 subtle(
-                    icon(data: feather::CHECK_CIRCLE)
-                    " Nothing needs your attention."
+                    <span class="inline-flex items-center gap-1">
+                        icon(data: feather::CHECK_CIRCLE)
+                        "Nothing needs your attention."
+                    </span>
                 )
             } else {
                 <ul class="list-disc pl-5 text-sm">
@@ -284,7 +286,9 @@ async fn speed(down: u64, up: u64) -> Result<impl View> {
 #[component]
 async fn stat(data: IconData, label: &str, child: Child<'_>) -> Result<impl View> {
     Ok(view! {
-        <div class="grid grid-cols-[7rem_1fr_auto] items-center gap-3 text-sm">
+        <div
+            class="grid grid-cols-[7rem_1fr_11rem] items-center gap-3 text-sm [&>:last-child]:text-right"
+        >
             <span class="flex items-center gap-2">
                 icon(data: data)
                 (label)

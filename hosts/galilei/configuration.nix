@@ -20,6 +20,7 @@
     ./qbittorrent.nix
     ./shell.nix
     ./sops.nix
+    ./swap.nix
     (modulesPath + "/profiles/qemu-guest.nix")
   ];
 
