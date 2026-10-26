@@ -1,27 +1,48 @@
-use std::{ffi::CString, fs, io::IsTerminal, path::Path, time::Duration};
+use std::{
+    fs,
+    io::IsTerminal,
+    path::Path,
+    sync::{LazyLock, Mutex},
+    time::{Duration, Instant},
+};
 
+use procfs::{Current, CurrentSI, KernelStats, LoadAverage, Meminfo, Uptime, net::dev_status};
 use serde_json::Value;
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpStream,
     process::Command,
     task::spawn_blocking,
-    time::timeout,
+    time::{sleep, timeout},
 };
 use topcoat::{
     Result,
+    asset::{AssetBundle, RouterBuilderAssetExt},
+    context::Cx,
+    icon::{IconData, icon, iconify},
     router::{module_router, page},
-    view::{View, component, view},
+    runtime::{RouterBuilderRuntimeExt, connected},
+    tailwind,
+    view::{Child, View, class, component, emit, live, view},
 };
 use tracing::{debug, info, warn};
 use tracing_subscriber::EnvFilter;
 
-const STYLE: &str = include_str!("style.css");
+iconify::include!("feather");
+iconify::include!("brands");
+
+const DOMAIN: &str = "frectonz.cloud";
 const LIBRARY: &str = "/data/media/library";
 const DATA: &str = "/data";
 const JELLYFIN: &str = "127.0.0.1:8096";
 const QBITTORRENT: &str = "127.0.0.1:8080";
 const VIDEO: &[&str] = &["mkv", "mp4", "avi", "webm", "m4v", "mov"];
+const REFRESH: Duration = Duration::from_secs(5);
+
+static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(2))
+        .build()
+        .expect("http client")
+});
 
 #[tokio::main]
 async fn main() {
@@ -30,60 +51,51 @@ async fn main() {
         .with_ansi(std::io::stdout().is_terminal())
         .init();
     info!("starting landing");
-    topcoat::start(module_router!().build()).await.unwrap();
-}
-
-fn domain() -> String {
-    std::env::var("DOMAIN").unwrap_or_else(|_| "localhost".into())
+    tokio::spawn(sample_rates());
+    let assets = AssetBundle::load().expect("asset bundle next to the binary");
+    let router = module_router!().assets(assets).runtime().build();
+    topcoat::start(router).await.unwrap();
 }
 
 #[page]
-async fn home() -> Result<impl View> {
-    let (jellyfin, qbittorrent, system) = tokio::join!(jellyfin(), qbittorrent(), system());
-    let notices = notices(&jellyfin, &qbittorrent, &system);
-    debug!(?jellyfin, ?qbittorrent, ?system, "rendering home");
-    let domain = domain();
-
+async fn home(cx: &Cx) -> Result<impl View> {
     Ok(view! {
         <!DOCTYPE html>
         <html lang="en">
             <head>
                 <meta charset="utf-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1">
-                <title>(domain.as_str())</title>
-                <style>(STYLE)</style>
+                <title>(DOMAIN)</title>
+                <link rel="stylesheet" href=(tailwind::stylesheet!())>
+                topcoat::runtime::script()
             </head>
-            <body>
-                <main>
-                    <header>
-                        <h1>(domain.as_str())</h1>
-                        <p class="meta">
-                            "galilei · up " (system.uptime) " · load " (system.load)
-                        </p>
-                    </header>
-
-                    <section class="cards">
-                        jellyfin_card(domain: &domain, info: &jellyfin)
-                        qbittorrent_card(domain: &domain, info: &qbittorrent)
-                    </section>
-
-                    <section class="stats">
-                        gauge(label: "Disk", used: system.disk_used, total: system.disk_total)
-                        gauge(label: "Memory", used: system.mem_used, total: system.mem_total)
-                    </section>
-
-                    <section class="notices">
-                        <h2>"Notices"</h2>
-                        if notices.is_empty() {
-                            <p class="meta">"Nothing needs your attention."</p>
-                        } else {
-                            <ul>
-                                for notice in notices {
-                                    <li>(notice)</li>
-                                }
-                            </ul>
+            <body
+                class="min-h-screen bg-zinc-100 font-sans text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100"
+            >
+                <main class="mx-auto max-w-3xl px-4 py-8">
+                    (live! {
+                        loop {
+                            let (jellyfin, qbittorrent, system) = tokio::join!(
+                                jellyfin(),
+                                qbittorrent(),
+                                system(),
+                            );
+                            let notices = notices(&jellyfin, &qbittorrent, &system);
+                            debug!(?jellyfin, ?qbittorrent, ?system, "rendering dashboard");
+                            let token = emit! {
+                                dashboard(
+                                    jellyfin: &jellyfin,
+                                    qbittorrent: &qbittorrent,
+                                    system: &system,
+                                    notices: &notices
+                                )
+                            }?;
+                            if !connected(cx) {
+                                break Ok(token);
+                            }
+                            sleep(REFRESH).await;
                         }
-                    </section>
+                    })
                 </main>
             </body>
         </html>
@@ -91,57 +103,240 @@ async fn home() -> Result<impl View> {
 }
 
 #[component]
-async fn jellyfin_card(domain: &str, info: &Jellyfin) -> Result<impl View> {
-    let href = format!("https://jellyfin.{domain}");
-    let status = match &info.version {
-        Some(version) => format!("Jellyfin {version}"),
-        None => "not responding".to_string(),
-    };
+async fn dashboard(
+    jellyfin: &Jellyfin,
+    qbittorrent: &Qbittorrent,
+    system: &System,
+    notices: &[String],
+) -> Result<impl View> {
     Ok(view! {
-        <a class="card" href=(href)>
-            <h2>"Jellyfin"</h2>
-            <p class="big">(plural(info.movies, "movie"))</p>
-            <p>(plural(info.shows, "show")) " · " (plural(info.episodes, "episode"))</p>
-            <p class="meta">(status)</p>
-        </a>
+        <header>
+            <h1 class="text-3xl font-bold">(DOMAIN)</h1>
+            subtle(
+                "galilei · up "
+                (system.uptime.as_str())
+                " · load "
+                (system.load.as_str())
+            )
+        </header>
+
+        <section class="my-6 grid gap-4 sm:grid-cols-2">
+            jellyfin_card(info: jellyfin)
+            qbittorrent_card(info: qbittorrent)
+        </section>
+
+        <section class="my-6 grid gap-3">
+            gauge(
+                data: feather::HARD_DRIVE,
+                label: "Disk",
+                used: system.disk_used,
+                total: system.disk_total
+            )
+            gauge(
+                data: feather::DATABASE,
+                label: "Memory",
+                used: system.mem_used,
+                total: system.mem_total
+            )
+            swap_gauge(used: system.swap_used, total: system.swap_total)
+            stat(
+                data: feather::CPU,
+                label: "CPU",
+                bar(percent: system.cpu)
+                <span>
+                    (system.cpu)
+                    "%"
+                </span>
+            )
+            stat(
+                data: feather::ACTIVITY,
+                label: "Network",
+                speed(down: system.rx_rate, up: system.tx_rate)
+                <span class="text-zinc-500 dark:text-zinc-400">
+                    (bytes(system.rx_total))
+                    " in · "
+                    (bytes(system.tx_total))
+                    " out"
+                </span>
+            )
+        </section>
+
+        <section>
+            card_title(data: feather::BELL, "Notices")
+            if notices.is_empty() {
+                subtle(
+                    icon(data: feather::CHECK_CIRCLE)
+                    " Nothing needs your attention."
+                )
+            } else {
+                <ul class="list-disc pl-5 text-sm">
+                    for notice in notices {
+                        <li class="my-1">(notice)</li>
+                    }
+                </ul>
+            }
+        </section>
     })
 }
 
 #[component]
-async fn qbittorrent_card(domain: &str, info: &Qbittorrent) -> Result<impl View> {
-    let href = format!("https://qbittorrent.{domain}");
-    let status = if info.online {
-        format!(
-            "↓ {}/s · ↑ {}/s",
-            bytes(info.down_speed),
-            bytes(info.up_speed)
+async fn jellyfin_card(info: &Jellyfin) -> Result<impl View> {
+    let href = format!("https://jellyfin.{DOMAIN}");
+    Ok(view! {
+        card(
+            href: &href,
+            card_title(data: brands::JELLYFIN, "Jellyfin")
+            big((plural(info.movies, "movie")))
+            <p>
+                (plural(info.shows, "show"))
+                " · "
+                (plural(info.episodes, "episode"))
+            </p>
+            subtle(
+                match &info.version {
+                    Some(version) => {
+                        "Jellyfin "
+                        (version)
+                    }
+                    None => {
+                        "not responding"
+                    }
+                }
+            )
         )
-    } else {
-        "not responding".to_string()
-    };
+    })
+}
+
+#[component]
+async fn qbittorrent_card(info: &Qbittorrent) -> Result<impl View> {
+    let href = format!("https://qbittorrent.{DOMAIN}");
     Ok(view! {
-        <a class="card" href=(href)>
-            <h2>"qBittorrent"</h2>
-            <p class="big">(info.downloading.to_string()) " downloading"</p>
-            <p>(info.seeding.to_string()) " seeding · " (info.errored.to_string()) " errored"</p>
-            <p class="meta">(status)</p>
+        card(
+            href: &href,
+            card_title(data: brands::QBITTORRENT, "qBittorrent")
+            big(
+                (info.downloading)
+                " downloading"
+            )
+            <p>
+                (info.seeding)
+                " seeding · "
+                (info.errored)
+                " errored"
+            </p>
+            subtle(
+                if info.online {
+                    speed(down: info.down_speed, up: info.up_speed)
+                } else {
+                    "not responding"
+                }
+            )
+        )
+    })
+}
+
+#[component]
+async fn card(href: &str, child: Child<'_>) -> Result<impl View> {
+    Ok(view! {
+        <a
+            class="block rounded-xl border border-zinc-200 bg-white p-5 hover:border-zinc-400 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-600"
+            href=(href)
+        >
+            (child)
         </a>
     })
 }
 
 #[component]
-async fn gauge(label: &str, used: u64, total: u64) -> Result<impl View> {
-    let pct = percent(used, total);
-    let width = format!("width: {pct}%");
+async fn card_title(data: IconData, child: Child<'_>) -> Result<impl View> {
+    Ok(view! {
+        <h2 class="mb-2 flex items-center gap-2 text-base font-semibold">
+            icon(data: data)
+            (child)
+        </h2>
+    })
+}
+
+#[component]
+async fn big(child: Child<'_>) -> Result<impl View> {
+    Ok(view! { <p class="text-3xl font-semibold">(child)</p> })
+}
+
+#[component]
+async fn subtle(child: Child<'_>) -> Result<impl View> {
+    Ok(view! { <p class="text-sm text-zinc-500 dark:text-zinc-400">(child)</p> })
+}
+
+#[component]
+async fn speed(down: u64, up: u64) -> Result<impl View> {
+    Ok(view! {
+        <span class="inline-flex items-center gap-1">
+            icon(data: feather::ARROW_DOWN)
+            (bytes(down))
+            "/s · "
+            icon(data: feather::ARROW_UP)
+            (bytes(up))
+            "/s"
+        </span>
+    })
+}
+
+#[component]
+async fn stat(data: IconData, label: &str, child: Child<'_>) -> Result<impl View> {
+    Ok(view! {
+        <div class="grid grid-cols-[7rem_1fr_auto] items-center gap-3 text-sm">
+            <span class="flex items-center gap-2">
+                icon(data: data)
+                (label)
+            </span>
+            (child)
+        </div>
+    })
+}
+
+#[component]
+async fn bar(percent: u64) -> Result<impl View> {
+    let width = format!("width: {percent}%");
+    Ok(view! {
+        <div class="h-2 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
+            <div
+                class=(class!(
+                    "h-full",
+                    "bg-red-600 dark:bg-red-400" if percent >= 80 else "bg-blue-600 dark:bg-blue-400",
+                ))
+                style=(width)
+            ></div>
+        </div>
+    })
+}
+
+#[component]
+async fn gauge(data: IconData, label: &str, used: u64, total: u64) -> Result<impl View> {
     let text = format!("{} of {}", bytes(used), bytes(total));
     Ok(view! {
-        <div class="stat">
-            <span>(label)</span>
-            <div class="bar">
-                <div class=(if pct >= 80 { "fill warn" } else { "fill" }) style=(width)></div>
-            </div>
+        stat(
+            data: data,
+            label: label,
+            bar(percent: percent(used, total))
             <span>(text)</span>
-        </div>
+        )
+    })
+}
+
+#[component]
+async fn swap_gauge(used: u64, total: u64) -> Result<impl View> {
+    let text = if total == 0 {
+        "none".to_string()
+    } else {
+        format!("{} of {}", bytes(used), bytes(total))
+    };
+    Ok(view! {
+        stat(
+            data: feather::LAYERS,
+            label: "Swap",
+            bar(percent: percent(used, total))
+            <span>(text)</span>
+        )
     })
 }
 
@@ -195,7 +390,6 @@ struct Jellyfin {
 async fn jellyfin() -> Jellyfin {
     let version = get(JELLYFIN, "/System/Info/Public")
         .await
-        .and_then(|body| serde_json::from_str::<Value>(&body).ok())
         .and_then(|v| v["Version"].as_str().map(str::to_string));
     if version.is_none() {
         warn!("jellyfin is not responding");
@@ -256,7 +450,7 @@ async fn qbittorrent() -> Qbittorrent {
         get(QBITTORRENT, "/api/v2/torrents/info"),
         get(QBITTORRENT, "/api/v2/transfer/info")
     );
-    let Some(torrents) = torrents.and_then(|b| serde_json::from_str::<Value>(&b).ok()) else {
+    let Some(torrents) = torrents else {
         warn!("qbittorrent is not responding");
         return Qbittorrent::default();
     };
@@ -273,7 +467,7 @@ async fn qbittorrent() -> Qbittorrent {
             _ => {}
         }
     }
-    if let Some(transfer) = transfer.and_then(|b| serde_json::from_str::<Value>(&b).ok()) {
+    if let Some(transfer) = transfer {
         info.down_speed = transfer["dl_info_speed"].as_u64().unwrap_or(0);
         info.up_speed = transfer["up_info_speed"].as_u64().unwrap_or(0);
     }
@@ -288,27 +482,109 @@ struct System {
     disk_total: u64,
     mem_used: u64,
     mem_total: u64,
+    swap_used: u64,
+    swap_total: u64,
+    cpu: u64,
+    rx_rate: u64,
+    tx_rate: u64,
+    rx_total: u64,
+    tx_total: u64,
     failed_units: Vec<String>,
     reboot_needed: bool,
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+struct Rates {
+    cpu: u64,
+    rx_rate: u64,
+    tx_rate: u64,
+    rx_total: u64,
+    tx_total: u64,
+}
+
+static RATES: Mutex<Rates> = Mutex::new(Rates {
+    cpu: 0,
+    rx_rate: 0,
+    tx_rate: 0,
+    rx_total: 0,
+    tx_total: 0,
+});
+
+async fn sample_rates() {
+    let mut prev = (Instant::now(), cpu_ticks(), net_bytes());
+    loop {
+        sleep(Duration::from_secs(2)).await;
+        let now = (Instant::now(), cpu_ticks(), net_bytes());
+        let elapsed = now.0.duration_since(prev.0).as_secs_f64().max(0.001);
+        let (busy, total) = (
+            now.1.0.saturating_sub(prev.1.0),
+            now.1.1.saturating_sub(prev.1.1),
+        );
+        let rates = Rates {
+            cpu: percent(busy, total),
+            rx_rate: ((now.2.0.saturating_sub(prev.2.0)) as f64 / elapsed) as u64,
+            tx_rate: ((now.2.1.saturating_sub(prev.2.1)) as f64 / elapsed) as u64,
+            rx_total: now.2.0,
+            tx_total: now.2.1,
+        };
+        *RATES.lock().unwrap_or_else(|e| e.into_inner()) = rates;
+        prev = now;
+    }
+}
+
+fn cpu_ticks() -> (u64, u64) {
+    let Ok(stats) = KernelStats::current() else {
+        warn!("could not read /proc/stat");
+        return (0, 0);
+    };
+    let t = stats.total;
+    let idle = t.idle + t.iowait.unwrap_or(0);
+    let total = t.user
+        + t.nice
+        + t.system
+        + idle
+        + t.irq.unwrap_or(0)
+        + t.softirq.unwrap_or(0)
+        + t.steal.unwrap_or(0);
+    (total - idle, total)
+}
+
+fn net_bytes() -> (u64, u64) {
+    let Ok(devices) = dev_status() else {
+        warn!("could not read /proc/net/dev");
+        return (0, 0);
+    };
+    devices
+        .values()
+        .filter(|d| d.name != "lo")
+        .fold((0, 0), |acc, d| {
+            (acc.0 + d.recv_bytes, acc.1 + d.sent_bytes)
+        })
 }
 
 async fn system() -> System {
     let failed_units = failed_units().await;
     let mut system = spawn_blocking(system_blocking).await.unwrap_or_default();
+    let rates = *RATES.lock().unwrap_or_else(|e| e.into_inner());
     system.failed_units = failed_units;
+    system.cpu = rates.cpu;
+    system.rx_rate = rates.rx_rate;
+    system.tx_rate = rates.tx_rate;
+    system.rx_total = rates.rx_total;
+    system.tx_total = rates.tx_total;
     system
 }
 
 fn system_blocking() -> System {
-    let uptime_secs = fs::read_to_string("/proc/uptime")
-        .ok()
-        .and_then(|s| s.split_whitespace().next()?.parse::<f64>().ok())
-        .unwrap_or(0.0) as u64;
-    let load = fs::read_to_string("/proc/loadavg")
-        .ok()
-        .and_then(|s| s.split_whitespace().next().map(str::to_string))
-        .unwrap_or_else(|| "?".into());
-    let (mem_total, mem_used) = meminfo();
+    let uptime_secs = Uptime::current().map(|u| u.uptime as u64).unwrap_or(0);
+    let load = LoadAverage::current()
+        .map(|l| format!("{:.2}", l.one))
+        .unwrap_or_else(|_| "?".into());
+    let mem = Meminfo::current().ok();
+    let mem_total = mem.as_ref().map(|m| m.mem_total).unwrap_or(0);
+    let mem_available = mem.as_ref().and_then(|m| m.mem_available).unwrap_or(0);
+    let swap_total = mem.as_ref().map(|m| m.swap_total).unwrap_or(0);
+    let swap_free = mem.as_ref().map(|m| m.swap_free).unwrap_or(0);
     let (disk_total, disk_used) = statvfs(DATA);
     let reboot_needed = match (
         fs::read_link("/run/booted-system/kernel"),
@@ -322,43 +598,22 @@ fn system_blocking() -> System {
         load,
         disk_used,
         disk_total,
-        mem_used,
+        mem_used: mem_total.saturating_sub(mem_available),
         mem_total,
-        failed_units: Vec::new(),
+        swap_used: swap_total.saturating_sub(swap_free),
+        swap_total,
         reboot_needed,
+        ..Default::default()
     }
 }
 
-fn meminfo() -> (u64, u64) {
-    let text = fs::read_to_string("/proc/meminfo").unwrap_or_default();
-    let field = |name: &str| {
-        text.lines()
-            .find(|l| l.starts_with(name))
-            .and_then(|l| l.split_whitespace().nth(1)?.parse::<u64>().ok())
-            .unwrap_or(0)
-            * 1024
-    };
-    let total = field("MemTotal:");
-    let available = field("MemAvailable:");
-    (total, total.saturating_sub(available))
-}
-
 fn statvfs(path: &str) -> (u64, u64) {
-    let Ok(path) = CString::new(path) else {
+    let Ok(vfs) = rustix::fs::statvfs(path) else {
+        warn!("statvfs failed for {path}");
         return (0, 0);
     };
-    let mut stat = std::mem::MaybeUninit::<libc::statvfs>::uninit();
-    // SAFETY: statvfs writes into the provided buffer and we only read it on success.
-    let stat = unsafe {
-        if libc::statvfs(path.as_ptr(), stat.as_mut_ptr()) != 0 {
-            warn!("statvfs failed for {}", path.to_string_lossy());
-            return (0, 0);
-        }
-        stat.assume_init()
-    };
-    let frsize = stat.f_frsize as u64;
-    let total = stat.f_blocks as u64 * frsize;
-    let free = stat.f_bfree as u64 * frsize;
+    let total = vfs.f_blocks * vfs.f_frsize;
+    let free = vfs.f_bfree * vfs.f_frsize;
     (total, total.saturating_sub(free))
 }
 
@@ -383,87 +638,27 @@ async fn failed_units() -> Vec<String> {
     }
 }
 
-async fn get(addr: &str, path: &str) -> Option<String> {
-    match timeout(Duration::from_secs(2), request(addr, path)).await {
-        Ok(Some(body)) => Some(body),
-        Ok(None) => {
-            warn!(addr, path, "request failed");
+async fn get(addr: &str, path: &str) -> Option<Value> {
+    let url = format!("http://{addr}{path}");
+    let response = match CLIENT
+        .get(&url)
+        .send()
+        .await
+        .and_then(|r| r.error_for_status())
+    {
+        Ok(response) => response,
+        Err(error) => {
+            warn!(url, %error, "request failed");
+            return None;
+        }
+    };
+    match response.json().await {
+        Ok(value) => Some(value),
+        Err(error) => {
+            warn!(url, %error, "invalid response");
             None
         }
-        Err(_) => {
-            warn!(addr, path, "request timed out");
-            None
-        }
     }
-}
-
-async fn request(addr: &str, path: &str) -> Option<String> {
-    let mut stream = TcpStream::connect(addr).await.ok()?;
-    let req = format!(
-        "GET {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\nAccept: application/json\r\n\r\n"
-    );
-    stream.write_all(req.as_bytes()).await.ok()?;
-
-    let mut buf = Vec::new();
-    let mut chunk = [0u8; 8192];
-    loop {
-        let n = stream.read(&mut chunk).await.ok()?;
-        if n == 0 {
-            break;
-        }
-        buf.extend_from_slice(&chunk[..n]);
-        let Some(end) = buf.windows(4).position(|w| w == b"\r\n\r\n") else {
-            continue;
-        };
-        let head = String::from_utf8_lossy(&buf[..end]).to_ascii_lowercase();
-        let body_len = buf.len() - (end + 4);
-        if let Some(len) = header(&head, "content-length").and_then(|v| v.parse::<usize>().ok()) {
-            if body_len >= len {
-                break;
-            }
-        } else if header(&head, "transfer-encoding").is_some_and(|v| v.contains("chunked"))
-            && buf.ends_with(b"0\r\n\r\n")
-        {
-            break;
-        }
-    }
-
-    let text = String::from_utf8_lossy(&buf);
-    let (head, body) = text.split_once("\r\n\r\n")?;
-    let status = head.split_whitespace().nth(1)?;
-    if status != "200" {
-        warn!(addr, path, status, "unexpected response");
-        return None;
-    }
-    let chunked = header(&head.to_ascii_lowercase(), "transfer-encoding")
-        .is_some_and(|v| v.contains("chunked"));
-    Some(if chunked {
-        dechunk(body)
-    } else {
-        body.to_string()
-    })
-}
-
-fn header<'a>(head: &'a str, name: &str) -> Option<&'a str> {
-    head.lines()
-        .find_map(|line| line.strip_prefix(name)?.strip_prefix(':'))
-        .map(str::trim)
-}
-
-fn dechunk(body: &str) -> String {
-    let mut out = String::new();
-    let mut rest = body;
-    while let Some((size, after)) = rest.split_once("\r\n") {
-        let Ok(size) = usize::from_str_radix(size.trim(), 16) else {
-            break;
-        };
-        if size == 0 || after.len() < size {
-            break;
-        }
-        out.push_str(&after[..size]);
-        rest = after[size..].trim_start_matches("\r\n");
-    }
-    out
 }
 
 fn plural(n: usize, word: &str) -> String {

@@ -1,4 +1,4 @@
-{ pkgs, ... }:
+{ pkgs, perSystem, ... }:
 let
   toolchain = pkgs.rust-bin.stable.latest.default;
   rustPlatform = pkgs.makeRustPlatform {
@@ -11,6 +11,14 @@ rustPlatform.buildRustPackage {
   version = "0.1.0";
   src = ./.;
   cargoLock.lockFile = ./Cargo.lock;
+  nativeBuildInputs = [ perSystem.self.topcoat-cli ];
+  env.TAILWIND_CLI = pkgs.lib.getExe pkgs.tailwindcss_4;
+  postBuild = ''
+    CARGO_BUILD_TARGET=${pkgs.stdenv.hostPlatform.rust.rustcTarget} topcoat asset bundle --release --out assets
+  '';
+  postInstall = ''
+    cp -r assets $out/bin/assets
+  '';
   meta = {
     mainProgram = "landing";
     platforms = pkgs.lib.platforms.linux;
