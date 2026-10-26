@@ -28,6 +28,21 @@ let
     '';
   };
 
+  server-boot = pkgs.writeShellApplication {
+    name = "server-boot";
+    runtimeInputs = [ pkgs.nh ];
+    text = ''
+      nh os boot \
+        --hostname galilei \
+        --target-host ${target} \
+        --build-host ${target} \
+        --elevation-strategy none \
+        --diff never \
+        "$@" \
+        .
+    '';
+  };
+
   server-deploy = pkgs.writeShellApplication {
     name = "server-deploy";
     runtimeInputs = [
@@ -64,6 +79,7 @@ pkgs.mkShellNoCC {
 
     server-login
     server-switch
+    server-boot
     server-deploy
   ];
 
