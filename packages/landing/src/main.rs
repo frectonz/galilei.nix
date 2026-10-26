@@ -243,6 +243,7 @@ async fn card(href: &str, child: Child<'_>) -> Result<impl View> {
         <a
             class="block rounded-xl border border-zinc-200 bg-white p-5 hover:border-zinc-400 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-600"
             href=(href)
+            rel="noreferrer"
         >
             (child)
         </a>
