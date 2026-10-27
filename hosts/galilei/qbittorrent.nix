@@ -18,22 +18,13 @@ let
     (officialPlugin "eztv" "sha256-IqBRrp3mQDpXNVQMB0t41OskfenWNm74ltx1C4xRxLs=")
     (officialPlugin "piratebay" "sha256-s38T0h/18i/yFUpJfNPtLXJ3hAJNCdOTwb6tiOQ42rU=")
     (officialPlugin "limetorrents" "sha256-rKP7xJVpcEdKZilfXmHwJTK831OZrpfBRL+CanyP3c4=")
-    (officialPlugin "torlock" "sha256-uEgZBlZTSnipgMuSWhTfDWGRT/dpy1xxlz4E5Sd3hHc=")
     (officialPlugin "solidtorrents" "sha256-4Q4DmwLGdfvq5lA0gvH7Emg7uhw59UJOfCcp3ETRKnE=")
-    (officialPlugin "torrentproject" "sha256-ZJYLuNfr3oKbVf21pmn5bLBpTY1JzIeq+WDx8drnk/A=")
     (officialPlugin "torrentscsv" "sha256-fHyKVCSeXyziN99kIac1pcG9es79EwTXNu6Pkl/WAxs=")
     {
       name = "yts";
       src = pkgs.fetchurl {
         url = "https://codeberg.org/lazulyra/qbit-plugins/raw/commit/2537f6ddeeea10a8580c1ff0a49769941c5edc38/yts/yts.py";
         hash = "sha256-ywZjGbX2CSYhsh3rxDA9k3us0r2u9kPxdApRYUXL+54=";
-      };
-    }
-    {
-      name = "torrentgalaxy";
-      src = pkgs.fetchurl {
-        url = "https://raw.githubusercontent.com/nindogo/qbtSearchScripts/2c87b13668acfd5fd26c743be346b57ecffa263b/torrentgalaxy.py";
-        hash = "sha256-lEjL68JOvy219CLU4K4TkXuFEqgtRluiftrVggLdwy4=";
       };
     }
     {
